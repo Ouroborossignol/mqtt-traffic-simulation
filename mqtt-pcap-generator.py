@@ -30,29 +30,32 @@ class MQTTPacket:
     SUBSCRIBE = 0x82
     SUBACK = 0x90
 
-    def __init__(self, src_ip, dst_ip, src_port, dst_port):
+    def __init__(self, src_ip, dst_ip, src_port, dst_port, src_mac, dst_mac):
         self.src_ip = src_ip
         self.dst_ip = dst_ip
         self.src_port = src_port
         self.dst_port = dst_port
+        self.src_mac = src_mac
+        self.dst_mac = dst_mac
         self.tcp_state = TCPState()
         
     def create_tcp_handshake(self, peer_state):
         """Create TCP handshake packets with synchronized sequence numbers"""
-        # Add Ethernet layer to all packets
-        syn = Ether() / IP(src=self.src_ip, dst=self.dst_ip) / \
+        # Add Ethernet layer with MAC addresses to all packets
+        syn = Ether(src=self.src_mac, dst=self.dst_mac) / \
+              IP(src=self.src_ip, dst=self.dst_ip) / \
               TCP(sport=self.src_port, dport=self.dst_port, flags='S', 
                   seq=self.tcp_state.seq)
         
-        syn_ack = Ether() / IP(src=self.dst_ip, dst=self.src_ip) / \
+        syn_ack = Ether(src=self.dst_mac, dst=self.src_mac) / \
+                  IP(src=self.dst_ip, dst=self.src_ip) / \
                   TCP(sport=self.dst_port, dport=self.src_port, flags='SA',
                       seq=peer_state.seq, ack=self.tcp_state.seq + 1)
         
-        ack = Ether() / IP(src=self.src_ip, dst=self.dst_ip) / \
+        ack = Ether(src=self.src_mac, dst=self.dst_mac) / \
+              IP(src=self.src_ip, dst=self.dst_ip) / \
               TCP(sport=self.src_port, dport=self.dst_port, flags='A',
                   seq=self.tcp_state.seq + 1, ack=peer_state.seq + 1)
-        
-        # Rest of the function remains the same...
         
         self.tcp_state.seq += 1
         peer_state.seq += 1
@@ -62,22 +65,23 @@ class MQTTPacket:
         return [syn, syn_ack, ack]
 
     def create_application_packet(self, peer_state, mqtt_data):
-        tcp_packet = Ether() / IP(src=self.src_ip, dst=self.dst_ip) / \
+        tcp_packet = Ether(src=self.src_mac, dst=self.dst_mac) / \
+                    IP(src=self.src_ip, dst=self.dst_ip) / \
                     TCP(sport=self.src_port, dport=self.dst_port, flags='PA',
                         seq=self.tcp_state.seq, ack=self.tcp_state.ack) / \
                     Raw(mqtt_data)
         
-        ack_packet = Ether() / IP(src=self.dst_ip, dst=self.src_ip) / \
+        ack_packet = Ether(src=self.dst_mac, dst=self.src_mac) / \
+                    IP(src=self.dst_ip, dst=self.src_ip) / \
                     TCP(sport=self.dst_port, dport=self.src_port, flags='A',
                         seq=peer_state.seq, ack=self.tcp_state.seq + len(mqtt_data))
-        
-        # Rest of the function remains the same...
         
         self.tcp_state.seq += len(mqtt_data)
         peer_state.ack = self.tcp_state.seq
         
         return [tcp_packet, ack_packet]
 
+    # Rest of the MQTTPacket class methods remain unchanged...
     def create_mqtt_connect(self, peer_state, client_id):
         variable_header = b'\x00\x04MQTT\x04'
         connect_flags = 0x02
@@ -109,6 +113,7 @@ class MQTTPacket:
         return self.create_application_packet(peer_state, mqtt_data)
 
 def generate_mqtt_pcap(output_file):
+    # IP addresses
     broker = "192.168.1.100"
     publisher1 = "192.168.1.201"
     publisher2 = "192.168.1.202"
@@ -116,14 +121,21 @@ def generate_mqtt_pcap(output_file):
     subscriber2 = "192.168.1.204"
     mqtt_port = 1883
 
+    # MAC addresses (using locally administered addresses)
+    broker_mac = "02:00:00:00:00:00"
+    pub1_mac = "02:00:00:00:00:01"
+    pub2_mac = "02:00:00:00:00:02"
+    sub1_mac = "02:00:00:00:00:03"
+    sub2_mac = "02:00:00:00:00:04"
+
     packets = []
     timestamp = time.time()
 
-    # Create MQTT objects and their corresponding broker states
-    pub1 = MQTTPacket(publisher1, broker, 49152, mqtt_port)
-    pub2 = MQTTPacket(publisher2, broker, 49153, mqtt_port)
-    sub1 = MQTTPacket(subscriber1, broker, 49154, mqtt_port)
-    sub2 = MQTTPacket(subscriber2, broker, 49155, mqtt_port)
+    # Create MQTT objects with MAC addresses
+    pub1 = MQTTPacket(publisher1, broker, 49152, mqtt_port, pub1_mac, broker_mac)
+    pub2 = MQTTPacket(publisher2, broker, 49153, mqtt_port, pub2_mac, broker_mac)
+    sub1 = MQTTPacket(subscriber1, broker, 49154, mqtt_port, sub1_mac, broker_mac)
+    sub2 = MQTTPacket(subscriber2, broker, 49155, mqtt_port, sub2_mac, broker_mac)
     
     broker_states = {
         'pub1': TCPState(),
@@ -155,9 +167,9 @@ def generate_mqtt_pcap(output_file):
             timestamp += 0.1
 
     # SUBSCRIBE packets with SUBACK responses
-    for sub, state, topic in [
-        (sub1, broker_states['sub1'], "temperature"),
-        (sub2, broker_states['sub2'], "humidity")
+    for sub, state, topic, broker_mac in [
+        (sub1, broker_states['sub1'], "temperature", broker_mac),
+        (sub2, broker_states['sub2'], "humidity", broker_mac)
     ]:
         # Subscribe packet and its ACK
         for pkt in sub.create_mqtt_subscribe(state, 1, topic):
@@ -165,7 +177,7 @@ def generate_mqtt_pcap(output_file):
             timestamp += 0.1
         
         # Create broker response with SUBACK
-        broker_resp = MQTTPacket(broker, sub.src_ip, mqtt_port, sub.src_port)
+        broker_resp = MQTTPacket(broker, sub.src_ip, mqtt_port, sub.src_port, broker_mac, sub.src_mac)
         broker_resp.tcp_state = state
         for pkt in broker_resp.create_mqtt_suback(sub.tcp_state, 1):
             packets.append((timestamp, pkt))
