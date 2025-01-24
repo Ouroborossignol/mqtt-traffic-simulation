@@ -186,7 +186,7 @@ def generate_mqtt_pcap(output_file):
     # Generate publish events
     for i in range(10):
         # Temperature updates
-        temp = f"23.5°C"  # Exactly 7 bytes
+        temp = f"{random.uniform(22.9, 23.6):.1f}°C"  # Exactly 7 bytes
         for pkt in pub1.create_mqtt_publish(broker_states['pub1'], "temperature", temp):
             packets.append((timestamp, pkt))
             timestamp += 0.1
