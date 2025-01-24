@@ -100,18 +100,18 @@ class MQTTPacket:
 def generate_exfiltration_pcap(output_file):
     # IP addresses
     broker = "192.168.1.100"
-    attacker = "192.168.1.250"  # Suspicious client
+    attacker = "192.168.1.201"  # Suspicious client
     mqtt_port = 1883
 
     # MAC addresses (using locally administered addresses)
     broker_mac = "02:00:00:00:00:00"
-    attacker_mac = "02:00:00:00:00:FF"  # Using FF to distinguish attacker
+    attacker_mac = "02:00:00:00:00:01"  # Using 01 to mimick temperature_sensor
 
     packets = []
     timestamp = time.time()
 
     # Create MQTT objects with MAC addresses
-    malicious_client = MQTTPacket(attacker, broker, 49160, mqtt_port, attacker_mac, broker_mac)
+    malicious_client = MQTTPacket(attacker, broker, 49152, mqtt_port, attacker_mac, broker_mac)
     broker_state = TCPState()
 
     # TCP handshake
@@ -120,7 +120,7 @@ def generate_exfiltration_pcap(output_file):
         timestamp += 0.001
 
     # CONNECT packet with innocent-looking client ID
-    for pkt in malicious_client.create_mqtt_connect(broker_state, "sensor_device"):
+    for pkt in malicious_client.create_mqtt_connect(broker_state, "temp_sensor"):
         packets.append((timestamp, pkt))
         timestamp += 0.1
 
